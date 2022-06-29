@@ -1,83 +1,99 @@
 use anyhow::{anyhow, Result};
 use log::debug;
-use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_int};
+use std::ffi::CStr;
+use std::os::raw::c_char;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GoString {
+    pub p: *const c_char,
+    pub n: isize,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GoSlice {
+    pub data: *const c_char,
+    pub len: i64,
+    pub cap: i64,
+}
 
 // Link import cgo function
 #[link(name = "intoto")]
 extern "C" {
     pub fn verifyGo(
-        layoutPath: *const c_char, 
-        pubKeyPaths: *const *const c_char, 
-        pubKeyCountc: c_int,
-        intermediatePathsc: *const *const c_char,
-        intermediatePathCountc: c_int,
-        linkDir: *const c_char, 
-        lineNormalizationc: c_int, 
+        layoutPath: GoString,
+        pubKeyPaths: GoSlice,
+        intermediatePaths: GoSlice,
+        linkDir: GoString,
+        lineNormalizationc: i32,
     ) -> *mut c_char;
 }
 
 pub fn verify(
-    layout_path: String, 
-    pub_key_paths: Vec<String>, 
+    layout_path: String,
+    pub_key_paths: Vec<String>,
     intermediate_paths: Vec<String>,
     link_dir: String,
     line_normalization: bool,
 ) -> Result<String> {
+    // Convert Rust String to GoString
+    let layout_path = GoString {
+        p: layout_path.as_ptr() as *const c_char,
+        n: layout_path.len() as isize,
+    };
+
+    // Convert Rust Vec<String> to GoSlice of GoString
+    let pub_key_paths_vec: Vec<_> = pub_key_paths
+        .iter()
+        .map(|arg| GoString {
+            p: arg.as_ptr() as *const c_char,
+            n: arg.len() as isize,
+        })
+        .collect();
+
+    let pub_key_paths_goslice = GoSlice {
+        data: pub_key_paths_vec.as_ptr() as *const c_char,
+        len: pub_key_paths_vec.len() as i64,
+        cap: pub_key_paths_vec.len() as i64,
+    };
+
+    // Convert Rust Vec<String> to GoSlice of GoString
+    let intermediate_paths_vec: Vec<_> = intermediate_paths
+        .iter()
+        .map(|arg| GoString {
+            p: arg.as_ptr() as *const c_char,
+            n: arg.len() as isize,
+        })
+        .collect();
+
+    let intermediate_paths_goslice = GoSlice {
+        data: intermediate_paths_vec.as_ptr() as *const c_char,
+        len: intermediate_paths_vec.len() as i64,
+        cap: intermediate_paths_vec.len() as i64,
+    };
 
     // Convert Rust String to C char*
-    let layout_path_c = layout_path.as_ptr() as *const c_char;
-
-    // Convert Rust Vec<String> to C char**
-    let pub_key_paths_cstr: Vec<_> = pub_key_paths.iter()
-        .map(|arg| CString::new(arg.as_str()).unwrap())
-        .collect();
-    
-    let mut pub_key_paths_cstr_pointer: Vec<_> = pub_key_paths_cstr.iter()
-        .map(|arg| arg.as_ptr())
-        .collect();
-    
-    pub_key_paths_cstr_pointer.push(std::ptr::null());
-    
-    let pub_key_paths_c: *const *const c_char = pub_key_paths_cstr_pointer.as_ptr();
-
-    // Rust Vec len
-    let pub_key_count_c = pub_key_paths.len() as c_int;
-
-    // Convert Rust Vec<String> to C char**
-    let intermediate_paths_cstr: Vec<_> = intermediate_paths.iter()
-        .map(|arg| CString::new(arg.as_str()).unwrap())
-        .collect();
-    
-    let mut intermediate_paths_cstr_pointer: Vec<_> = intermediate_paths_cstr.iter()
-        .map(|arg| arg.as_ptr())
-        .collect();
-    
-        intermediate_paths_cstr_pointer.push(std::ptr::null());
-    
-    let intermediate_paths_c: *const *const c_char = intermediate_paths_cstr_pointer.as_ptr();
-
-    // Rust Vec len
-    let intermediate_path_count_c = intermediate_paths.len() as c_int;
-
-    // Convert Rust String to C char*
-    let link_dir_c = link_dir.as_ptr() as *const c_char;
+    let link_dir = GoString {
+        p: link_dir.as_ptr() as *const c_char,
+        n: link_dir.len() as isize,
+    };
 
     // Convert Rust bool to C int
-    let line_normalization_c = line_normalization as c_int;
+    let line_normalization_c = line_normalization as i32;
 
     // Call the function exported by cgo and process the returned string
-    let result_buf : *mut c_char = unsafe { verifyGo(
-        layout_path_c,
-        pub_key_paths_c,
-        pub_key_count_c,
-        intermediate_paths_c,
-        intermediate_path_count_c,
-        link_dir_c,
-        line_normalization_c,
-    )};
+    let result_buf: *mut c_char = unsafe {
+        verifyGo(
+            layout_path,
+            pub_key_paths_goslice,
+            intermediate_paths_goslice,
+            link_dir,
+            line_normalization_c,
+        )
+    };
 
-    let result_str: &CStr = unsafe {CStr::from_ptr(result_buf)};
+    let result_str: &CStr = unsafe { CStr::from_ptr(result_buf) };
     let res = result_str.to_str()?.to_string();
     debug!("In-toto verifyGo: {}", res);
 
@@ -105,7 +121,8 @@ mod tests {
             intermediate_paths,
             link_dir,
             line_normalization,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(res, "".to_string());
     }
 
@@ -122,6 +139,7 @@ mod tests {
             intermediate_paths,
             link_dir,
             line_normalization,
-        ).is_err());
+        )
+        .is_err());
     }
 }
