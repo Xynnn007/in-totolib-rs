@@ -3,6 +3,7 @@ package main
 import "C"
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -69,13 +70,19 @@ func verifyGo(
 		lineNormalization = true
 	}
 
-	_, err := intoto.InTotoVerify(layoutMb, layoutKeys, linkDir, "", make(map[string]string), intermediatePems, lineNormalization)
+	summaryLink, err := intoto.InTotoVerify(layoutMb, layoutKeys, linkDir, "", make(map[string]string), intermediatePems, lineNormalization)
 	if err != nil {
 		e := fmt.Errorf("inspection failed: %w", err)
 		return C.CString("Error:: " + e.Error())
 	}
 
-	return C.CString("")
+	jsonBytes, err := json.Marshal(summaryLink)
+	if err != nil {
+		e := fmt.Errorf("json failed: %w", err)
+		return C.CString("Error:: " + e.Error())
+	}
+
+	return C.CString(string(jsonBytes))
 }
 
 func main() {}

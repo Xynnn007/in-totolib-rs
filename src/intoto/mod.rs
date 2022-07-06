@@ -108,6 +108,8 @@ pub fn verify(
 mod tests {
     use super::verify;
 
+    const RESULT_STR: &str = r#"{"signed":{"_type":"link","name":"","materials":{},"products":{"foo.tar.gz":{"sha256":"52947cb78b91ad01fe81cd6aef42d1f6817e92b9e6936c1e5aabb7c98514f355"}},"byproducts":{"return-value":0,"stderr":"a foo.py\n","stdout":""},"command":["tar","zcvf","foo.tar.gz","foo.py"],"environment":null},"signatures":null}"#;
+    
     #[test]
     fn good_provenance() {
         let layout_path = "tests/good_provenance/demo.layout".to_string();
@@ -123,7 +125,7 @@ mod tests {
             line_normalization,
         )
         .unwrap();
-        assert_eq!(res, "".to_string());
+        assert_eq!(res, RESULT_STR);
     }
 
     #[test]
