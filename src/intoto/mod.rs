@@ -1,5 +1,10 @@
-use anyhow::{anyhow, Result};
-use log::debug;
+use anyhow::{anyhow, Error, Result};
+use in_toto::interchange::Json;
+use in_toto::models::byproducts::ByProducts;
+use in_toto::models::step::Command;
+use in_toto::models::{LinkMetadata, Metablock, Metadata, TargetDescription, VirtualTargetPath};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 
@@ -30,13 +35,53 @@ extern "C" {
     ) -> *mut c_char;
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct LinkShim {
+    #[serde(rename = "_type")]
+    typ: String,
+    name: String,
+    materials: BTreeMap<VirtualTargetPath, TargetDescription>,
+    products: BTreeMap<VirtualTargetPath, TargetDescription>,
+    #[serde(rename = "environment")]
+    env: Option<BTreeMap<String, String>>,
+    byproducts: ByProducts,
+    command: Vec<String>,
+}
+
+impl TryInto<LinkMetadata> for LinkShim {
+    fn try_into(self) -> Result<LinkMetadata> {
+        let mut cmd = String::new();
+        for substr in &self.command {
+            cmd.push_str(substr);
+            cmd.push(' ');
+        }
+
+        Ok(LinkMetadata::new(
+            self.name.clone(),
+            self.materials.clone(),
+            self.products.clone(),
+            self.env.clone(),
+            self.byproducts.clone(),
+            Command::from(cmd.trim_end()),
+        )?)
+    }
+
+    type Error = Error;
+}
+
+impl Metadata for LinkShim {
+    fn version(&self) -> u32 {
+        0
+    }
+}
+
 pub fn verify(
     layout_path: String,
     pub_key_paths: Vec<String>,
     intermediate_paths: Vec<String>,
     link_dir: String,
     line_normalization: bool,
-) -> Result<String> {
+) -> Result<LinkMetadata> {
     // Convert Rust String to GoString
     let layout_path = GoString {
         p: layout_path.as_ptr() as *const c_char,
@@ -95,21 +140,23 @@ pub fn verify(
 
     let result_str: &CStr = unsafe { CStr::from_ptr(result_buf) };
     let res = result_str.to_str()?.to_string();
-    debug!("In-toto verifyGo: {}", res);
 
     if res.starts_with("Error::") {
         return Err(anyhow!(res));
     }
 
-    Ok(res)
+    let res = res.replace("\"signatures\":null", "\"signatures\":[]");
+
+    let summary_link: Metablock<Json, LinkShim> = serde_json::from_str(&res)?;
+    let summary_link = summary_link.assume_valid()?.try_into()?;
+
+    Ok(summary_link)
 }
 
 #[cfg(test)]
 mod tests {
     use super::verify;
 
-    const RESULT_STR: &str = r#"{"signed":{"_type":"link","name":"","materials":{},"products":{"foo.tar.gz":{"sha256":"52947cb78b91ad01fe81cd6aef42d1f6817e92b9e6936c1e5aabb7c98514f355"}},"byproducts":{"return-value":0,"stderr":"a foo.py\n","stdout":""},"command":["tar","zcvf","foo.tar.gz","foo.py"],"environment":null},"signatures":null}"#;
-    
     #[test]
     fn good_provenance() {
         let layout_path = "tests/good_provenance/demo.layout".to_string();
@@ -123,9 +170,9 @@ mod tests {
             intermediate_paths,
             link_dir,
             line_normalization,
-        )
-        .unwrap();
-        assert_eq!(res, RESULT_STR);
+        );
+        println!("{:?}", res);
+        assert!(res.is_ok());
     }
 
     #[test]
