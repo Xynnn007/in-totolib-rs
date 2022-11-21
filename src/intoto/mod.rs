@@ -1,8 +1,7 @@
-use anyhow::{anyhow, Error, Result};
-use in_toto::interchange::Json;
+use anyhow::*;
 use in_toto::models::byproducts::ByProducts;
 use in_toto::models::step::Command;
-use in_toto::models::{LinkMetadata, Metablock, Metadata, TargetDescription, VirtualTargetPath};
+use in_toto::models::{LinkMetadata, Metablock, TargetDescription, VirtualTargetPath};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ffi::CStr;
@@ -67,12 +66,6 @@ impl TryInto<LinkMetadata> for LinkShim {
     }
 
     type Error = Error;
-}
-
-impl Metadata for LinkShim {
-    fn version(&self) -> u32 {
-        0
-    }
 }
 
 pub fn verify(
@@ -142,13 +135,17 @@ pub fn verify(
     let res = result_str.to_str()?.to_string();
 
     if res.starts_with("Error::") {
-        return Err(anyhow!(res));
+        bail!(res);
     }
 
     let res = res.replace("\"signatures\":null", "\"signatures\":[]");
 
-    let summary_link: Metablock<Json, LinkShim> = serde_json::from_str(&res)?;
-    let summary_link = summary_link.assume_valid()?.try_into()?;
+    let summary_link = match serde_json::from_str::<Metablock>(&res)?.metadata {
+        in_toto::models::MetadataWrapper::Layout(_) => {
+            bail!("verification output an unexpected layout file, should be link")
+        }
+        in_toto::models::MetadataWrapper::Link(inner) => inner,
+    };
 
     Ok(summary_link)
 }
